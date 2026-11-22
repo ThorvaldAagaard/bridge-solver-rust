@@ -6,6 +6,7 @@
 //! | here | service route | engine |
 //! |---|---|---|
 //! | [`Analyzer::dd_table`] | `POST /dd` | [`bridge_solver::par::solve_dd_table`] |
+//! | [`Analyzer::par`] | — | [`bridge_solver::par::par`] |
 //! | [`Analyzer::dd_play`] | `POST /dd/play` | [`bridge_solver::analyse_play::running_trace`] |
 //! | [`Analyzer::dd_play_node`] | `POST /dd/play/node` | [`bridge_solver::analyse_play::node_alternatives`] |
 //! | [`check_claim`] | — | [`bridge_solver::ClaimPosition`] |
@@ -87,6 +88,17 @@ impl Analyzer {
     /// `{ tricks, total }` as JSON, rows `N,E,S,W` and columns `C,D,H,S,NT`.
     pub fn dd_table(&self, dealstr: &str) -> Result<String, JsError> {
         json_api::dd_table(dealstr).map_err(js)
+    }
+
+    /// Par for a deal, given who is vulnerable: `None`, `NS`, `EW` or `All`.
+    ///
+    /// Returns `{ score_ns, optimum_score, par_contract }` as JSON, the same as
+    /// the C library's `bs_par` and the Python package's `par`, e.g.
+    /// `{"score_ns": 620, "optimum_score": "NS 620", "par_contract": "NS 4S="}`.
+    /// `par_contract` lists every contract tied at par, `"; "`-separated, and is
+    /// absent when the deal is passed out.
+    pub fn par(&self, dealstr: &str, vulnerable: &str) -> Result<String, JsError> {
+        json_api::par(dealstr, vulnerable).map_err(js)
     }
 
     /// Tier 1: the running trace — every played card with its double-dummy cost.
