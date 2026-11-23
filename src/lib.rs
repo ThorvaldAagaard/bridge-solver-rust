@@ -33,6 +33,8 @@ pub mod claim;
 pub mod claim_bench;
 mod convert;
 pub mod dd_bench;
+#[cfg(feature = "play-analysis")]
+pub mod dd_play;
 mod hands;
 #[cfg(feature = "json")]
 pub mod json_api;
