@@ -14,6 +14,13 @@
 //! a supplemental *section*, below `[Auction]` and `[Play]` and sorted
 //! alphabetically among any other sections.
 //!
+//! With `--play`, a board that records its play also gets
+//! - DoubleDummyPlay: every card played, and the double-dummy cost of each
+//!   card that could have been played instead
+//!
+//! a section of its own beside `[Play]`, specified in bridge-encodings'
+//! `docs/double-dummy-play.md`.
+//!
 //! Boards whose deal is incomplete are passed through untouched.
 //!
 //! How a PBN file is shaped is `bridge_encodings::pbn::PbnDocument`'s: it holds
@@ -31,9 +38,10 @@
 mod bench;
 
 use bridge_encodings::pbn::{
-    dd_table_to_pbn, is_optimum_result_row, optimum_result_table_header, optimum_result_table_rows,
-    PbnDocument,
+    dd_table_to_pbn, double_dummy_play_to_pbn_as, is_optimum_result_row,
+    optimum_result_table_header, optimum_result_table_rows, read_pbn, DdPlayStyle, PbnDocument,
 };
+use bridge_solver::dd_play::analyse_board_play;
 use bridge_solver::{par, Hands, TableSolver};
 use bridge_types::{DdTable, Direction, Strain, Vulnerability, DECLARERS};
 use clap::Parser;
@@ -77,6 +85,19 @@ struct Args {
     /// collection only fills in what is missing.
     #[arg(long = "recalculate")]
     recalculate: bool,
+
+    /// Also analyse the play, card by card: for each board with a [Play]
+    /// section, write a [DoubleDummyPlay] section giving the double-dummy
+    /// cost of every card that could have been played at each turn. A board
+    /// that already has one keeps it unless --recalculate.
+    #[arg(long = "play")]
+    play: bool,
+
+    /// With --play, spell every [DoubleDummyPlay] entry out rather than
+    /// writing `*` for a turn with no wrong card and `*+` for a run of them to
+    /// the end. Readers accept both.
+    #[arg(long = "play-explicit", requires = "play")]
+    play_explicit: bool,
 
     /// Verbose output - show progress
     #[arg(short = 'v', long = "verbose")]
@@ -210,11 +231,31 @@ fn main() {
             .collect()
     };
 
+    // The card-by-card analysis is its own batch: a board can need it while
+    // already carrying its table, and the other way about.
+    let play_jobs: Vec<PlayJob> = if args.play {
+        documents
+            .iter()
+            .enumerate()
+            .flat_map(|(file, doc)| plays_to_analyse(file, doc, args.recalculate))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let style = if args.play_explicit {
+        DdPlayStyle::Explicit
+    } else {
+        DdPlayStyle::Compact
+    };
+    let play_results = analyse_plays(&play_jobs, threads, style, args.verbose);
+
     // Each file is then annotated in place in its document, taking each board's
     // table from the batch.
     let mut tables = solved.into_iter();
     let mut changed = 0usize;
-    for ((path, doc), plan) in files.iter().zip(&mut documents).zip(&plans) {
+    for (file_index, ((path, doc), plan)) in
+        files.iter().zip(&mut documents).zip(&plans).enumerate()
+    {
         if args.verbose {
             eprintln!("Processing {}...", path.display());
         }
@@ -233,6 +274,28 @@ fn main() {
         }
         if args.verbose {
             eprintln!("Processed {} deal(s)", plan.len());
+        }
+        for (job, lines) in play_jobs.iter().zip(&play_results) {
+            if job.file != file_index {
+                continue;
+            }
+            match lines {
+                Ok(lines) => {
+                    let rows: Vec<&str> = lines.iter().map(String::as_str).collect();
+                    let written = doc.remove_tag(job.board, "DoubleDummyPlay").and_then(|()| {
+                        doc.set_section(job.board, "DoubleDummyPlay", &job.leader, &rows)
+                    });
+                    if let Err(e) = written {
+                        eprintln!("Error annotating '{}': {}", path.display(), e);
+                        std::process::exit(1);
+                    }
+                }
+                Err(why) => eprintln!(
+                    "Skipping the play of board {} in '{}': {why}",
+                    doc.tag(job.board, "Board").unwrap_or("(unnumbered)"),
+                    path.display()
+                ),
+            }
         }
         let result = doc.to_pbn();
 
@@ -357,6 +420,99 @@ struct Pending {
     board: usize,
     hands: Hands,
     vulnerability: Option<Vulnerability>,
+}
+
+/// A board whose play is to be analysed card by card.
+struct PlayJob {
+    /// Index into the inputs, and into that document's boards.
+    file: usize,
+    board: usize,
+    /// The record as written, parsed on its own.
+    record: bridge_types::Board,
+    /// The section tag's value: the opening leader.
+    leader: String,
+}
+
+/// The boards of `doc` whose play needs analysing: those with a `[Play]`
+/// section and, unless `recalculate`, no `[DoubleDummyPlay]` yet.
+fn plays_to_analyse(file: usize, doc: &PbnDocument, recalculate: bool) -> Vec<PlayJob> {
+    let mut jobs = Vec::new();
+    for board in 0..doc.boards().len() {
+        let Some(leader) = doc.tag(board, "Play") else {
+            continue;
+        };
+        if !recalculate && doc.tag(board, "DoubleDummyPlay").is_some() {
+            continue;
+        }
+        let Some(record) = doc
+            .record(board)
+            .and_then(|text| read_pbn(text).ok())
+            .and_then(|mut boards| (!boards.is_empty()).then(|| boards.remove(0)))
+        else {
+            continue;
+        };
+        jobs.push(PlayJob {
+            file,
+            board,
+            record,
+            leader: leader.to_string(),
+        });
+    }
+    jobs
+}
+
+/// Analyse each job's play, spread over `threads`, returning the section's
+/// lines or why the board was skipped, in job order.
+fn analyse_plays(
+    jobs: &[PlayJob],
+    threads: usize,
+    style: DdPlayStyle,
+    verbose: bool,
+) -> Vec<Result<Vec<String>, String>> {
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let one = |job: &PlayJob| -> Result<Vec<String>, String> {
+        let analysis = analyse_board_play(&job.record, |_, _| true).map_err(|e| e.to_string())?;
+        let play = job.record.play.as_ref().ok_or("no play on record")?;
+        double_dummy_play_to_pbn_as(&analysis, &job.record.deal, play, style)
+            .map_err(|e| e.to_string())
+    };
+    let mut results: Vec<Option<Result<Vec<String>, String>>> =
+        (0..jobs.len()).map(|_| None).collect();
+    let harvest = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..threads.min(jobs.len().max(1)))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        if i >= jobs.len() {
+                            break;
+                        }
+                        mine.push((i, one(&jobs[i])));
+                        if verbose {
+                            report_progress(&done, jobs.len());
+                        }
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers.into_iter().map(|w| w.join()).collect::<Vec<_>>()
+    });
+    for worker in harvest {
+        let Ok(found) = worker else {
+            eprintln!("Error: a play-analysis thread failed");
+            std::process::exit(1);
+        };
+        for (i, result) in found {
+            results[i] = Some(result);
+        }
+    }
+    results
+        .into_iter()
+        .map(|r| r.unwrap_or_else(|| Err("not analysed".to_string())))
+        .collect()
 }
 
 /// The boards of `doc` that need analysing, in file order.

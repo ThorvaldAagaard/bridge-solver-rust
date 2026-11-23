@@ -476,10 +476,12 @@ mod tests {
             Some("pn|S,W,N,E|ah|Board 46|")
         );
 
-        // A bare LIN string keeps its `+`, and the LIN parser resolves it.
+        // A bare LIN string keeps its `+`. So does the LIN parser: Bridge
+        // Composer reads `ah|Board+46|` as the header "Board+46", and
+        // bridge-encodings reads LIN the way it does.
         let bare = "pn|S,W,N,E|md|1SAKHJD876C5432,,,|sv|o|ah|Board+46|mb|1N|mb|p|mb|p|mb|p|";
         let got = parse(bare).expect("should parse");
-        assert_eq!(got.board.as_deref(), Some("Board 46"));
+        assert_eq!(got.board.as_deref(), Some("Board+46"));
     }
 
     #[test]
@@ -716,9 +718,12 @@ mod tests {
 
     #[test]
     fn parses_a_multi_board_file() {
+        // A file with `qx` records is split at each board's `qx` (a board may
+        // run over several lines, as vugraph files do), so every board in it
+        // carries one, as Bridge Composer and BBO write them.
         let content = format!(
             "{}\n{}\n",
-            REDOUBLED_CLAIMED, "pn|S,W,N,E|md|1SAKHJD876C5432,,,|sv|o|mb|p|mb|p|mb|p|mb|p|"
+            REDOUBLED_CLAIMED, "qx|o7|pn|S,W,N,E|md|1SAKHJD876C5432,,,|sv|o|mb|p|mb|p|mb|p|mb|p|"
         );
         let boards = parse_file(&content).expect("the file should read");
         assert_eq!(boards.len(), 2);

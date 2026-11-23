@@ -58,6 +58,8 @@ bridge-solver -w -i a.pbn b.pbn Extra/     # several inputs at once
 | `-w`, `--in-place` | Rewrite each input file where it sits. |
 | `-j`, `--threads <N>` | Worker threads for solving. Defaults to the machine's available parallelism; `1` solves serially. |
 | `--recalculate` | Redo boards that already carry analysis. |
+| `--play` | Also analyse each recorded play card by card, writing a `[DoubleDummyPlay]` section (see below). |
+| `--play-explicit` | With `--play`, spell every entry out instead of the compact `*` / `*+` form. |
 | `--mark-verified` | Set the "double-dummy data has been verified" bit in each annotated board's `[BCFlags]`. |
 | `-v`, `--verbose` | Report progress on stderr. |
 | `-h`, `--help` | Full help, with the long-form notes. |
@@ -404,3 +406,34 @@ be the deal you are waiting on.
 `bench/results/release-profile.md` is the full record: how this port compares
 with the C++ reference and with DDS 2.9, what has been tried, and what was found
 to be worthless.
+
+## Card-by-card analysis: `--play`
+
+With `--play`, every board that has a `[Play]` section also gets a
+`[DoubleDummyPlay]` section beside it: for each card played, the
+double-dummy cost of every card that could have been played at that turn.
+The format is bridge-encodings' `docs/double-dummy-play.md`. It is laid out
+like `[Play]`, one trick to a line:
+
+```
+[Play "W"]
+HA H8 H7 H2
+ST SJ S5 S3
+...
+[DoubleDummyPlay "W"]
+00.001111.11.111 * * *
+00.11111.11.111 001... 1000... 1000...
+...
+*+
+```
+
+Each entry is the player's hand at that turn in `[Deal]` notation, every
+legal card replaced by the tricks it gives away (`0` for a best card). A
+turn with no wrong card is written `*`, and a run of them to the end `*+`;
+`--play-explicit` spells every entry out instead. A
+board that already has the section keeps it unless `--recalculate`. A board
+whose play can't be analysed (no contract, a revoke, a lead from the wrong
+seat) is reported and left without one.
+
+The whole file is one batch spread over the threads: 216 played boards take
+about 5 s on 10 cores.
