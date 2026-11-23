@@ -59,6 +59,7 @@ bridge-solver -w -i a.pbn b.pbn Extra/     # several inputs at once
 | `-j`, `--threads <N>` | Worker threads for solving. Defaults to the machine's available parallelism; `1` solves serially. |
 | `--recalculate` | Redo boards that already carry analysis. |
 | `--play` | Also analyse each recorded play card by card, writing a `[DoubleDummyPlay]` section (see below). |
+| `--play-explicit` | With `--play`, spell every entry out instead of the compact `*` / `*+` form. |
 | `--mark-verified` | Set the "double-dummy data has been verified" bit in each annotated board's `[BCFlags]`. |
 | `-v`, `--verbose` | Report progress on stderr. |
 | `-h`, `--help` | Full help, with the long-form notes. |
@@ -420,13 +421,16 @@ HA H8 H7 H2
 ST SJ S5 S3
 ...
 [DoubleDummyPlay "W"]
-00.001111.11.111 .0.. .00.. .0000..
+00.001111.11.111 * * *
 00.11111.11.111 001... 1000... 1000...
 ...
+*+
 ```
 
 Each entry is the player's hand at that turn in `[Deal]` notation, every
 legal card replaced by the tricks it gives away (`0` for a best card). A
+turn with no wrong card is written `*`, and a run of them to the end `*+`;
+`--play-explicit` spells every entry out instead. A
 board that already has the section keeps it unless `--recalculate`. A board
 whose play can't be analysed (no contract, a revoke, a lead from the wrong
 seat) is reported and left without one.

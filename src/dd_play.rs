@@ -62,7 +62,7 @@ pub fn analyse_board_play(
     let contract = board
         .contract
         .as_deref()
-        .and_then(parse_contract)
+        .and_then(Contract::parse)
         .ok_or(DdPlayError::NoContract)?;
     let declarer = board.declarer.ok_or(DdPlayError::NoContract)?;
     if play.opening_leader != declarer.next() {
@@ -113,16 +113,6 @@ pub fn analyse_board_play(
         opening_leader: play.opening_leader,
         tricks,
         end: play.end,
-    })
-}
-
-/// A `[Contract]` value. Brill exports write notrump as `N` (`3N`), which
-/// PBN spells `NT`; both are read.
-fn parse_contract(text: &str) -> Option<Contract> {
-    Contract::parse(text).or_else(|| {
-        let level_and_n = text.find(['N', 'n'])?;
-        let (head, tail) = text.split_at(level_and_n + 1);
-        Contract::parse(&format!("{head}T{tail}"))
     })
 }
 
@@ -243,13 +233,6 @@ CT C7 S2 S6
                 entry.card
             );
         }
-    }
-
-    #[test]
-    fn reads_a_notrump_contract_written_n() {
-        assert_eq!(parse_contract("3N"), Contract::parse("3NT"));
-        assert_eq!(parse_contract("3NX"), Contract::parse("3NTX"));
-        assert!(parse_contract("3NT").is_some());
     }
 
     #[test]

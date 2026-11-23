@@ -38,8 +38,8 @@
 mod bench;
 
 use bridge_encodings::pbn::{
-    dd_table_to_pbn, double_dummy_play_to_pbn, is_optimum_result_row, optimum_result_table_header,
-    optimum_result_table_rows, read_pbn, PbnDocument,
+    dd_table_to_pbn, double_dummy_play_to_pbn_as, is_optimum_result_row,
+    optimum_result_table_header, optimum_result_table_rows, read_pbn, DdPlayStyle, PbnDocument,
 };
 use bridge_solver::dd_play::analyse_board_play;
 use bridge_solver::{par, Hands, TableSolver};
@@ -92,6 +92,12 @@ struct Args {
     /// that already has one keeps it unless --recalculate.
     #[arg(long = "play")]
     play: bool,
+
+    /// With --play, spell every [DoubleDummyPlay] entry out rather than
+    /// writing `*` for a turn with no wrong card and `*+` for a run of them to
+    /// the end. Readers accept both.
+    #[arg(long = "play-explicit", requires = "play")]
+    play_explicit: bool,
 
     /// Verbose output - show progress
     #[arg(short = 'v', long = "verbose")]
@@ -236,7 +242,12 @@ fn main() {
     } else {
         Vec::new()
     };
-    let play_results = analyse_plays(&play_jobs, threads, args.verbose);
+    let style = if args.play_explicit {
+        DdPlayStyle::Explicit
+    } else {
+        DdPlayStyle::Compact
+    };
+    let play_results = analyse_plays(&play_jobs, threads, style, args.verbose);
 
     // Each file is then annotated in place in its document, taking each board's
     // table from the batch.
@@ -455,6 +466,7 @@ fn plays_to_analyse(file: usize, doc: &PbnDocument, recalculate: bool) -> Vec<Pl
 fn analyse_plays(
     jobs: &[PlayJob],
     threads: usize,
+    style: DdPlayStyle,
     verbose: bool,
 ) -> Vec<Result<Vec<String>, String>> {
     let next = AtomicUsize::new(0);
@@ -462,7 +474,8 @@ fn analyse_plays(
     let one = |job: &PlayJob| -> Result<Vec<String>, String> {
         let analysis = analyse_board_play(&job.record, |_, _| true).map_err(|e| e.to_string())?;
         let play = job.record.play.as_ref().ok_or("no play on record")?;
-        double_dummy_play_to_pbn(&analysis, &job.record.deal, play).map_err(|e| e.to_string())
+        double_dummy_play_to_pbn_as(&analysis, &job.record.deal, play, style)
+            .map_err(|e| e.to_string())
     };
     let mut results: Vec<Option<Result<Vec<String>, String>>> =
         (0..jobs.len()).map(|_| None).collect();
