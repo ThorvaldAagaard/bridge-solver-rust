@@ -64,7 +64,7 @@ dependencies = [
 [[package]]
 name = "bridge-encodings"
 version = "0.1.0"
-source = "git+https://github.com/bridge-craftwork/bridge-encodings#4c6ca4c5e9ec6e451f6e0db8daf4cf35475bb47c"
+source = "git+https://github.com/bridge-craftwork/bridge-encodings#b11a239beef066179f5ff1dc50b1323dda8e0355"
 dependencies = [
  "bridge-types",
  "thiserror",
@@ -86,7 +86,7 @@ dependencies = [
 [[package]]
 name = "bridge-types"
 version = "0.1.0"
-source = "git+https://github.com/bridge-craftwork/bridge-types#ad9ac556f91fdf405215121261212ad98936bf83"
+source = "git+https://github.com/bridge-craftwork/bridge-types#76cb38c20cca9933abbb6658fd483d0978fabc92"
 
 [[package]]
 name = "cfg-if"
