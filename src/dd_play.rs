@@ -161,7 +161,10 @@ fn suit_order(suit: Suit) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bridge_encodings::pbn::{double_dummy_play_to_pbn, read_pbn};
+    use bridge_encodings::pbn::{
+        double_dummy_play_from_pbn, double_dummy_play_to_pbn, double_dummy_play_to_pbn_as,
+        read_pbn, DdPlayStyle,
+    };
 
     /// Board 1 of a Brill daily IMP export: 3♦ by South, eight tricks.
     const RECORD: &str = r#"[Board "1"]
@@ -201,9 +204,17 @@ CT C7 S2 S6
                 assert!(turn.cards.iter().any(|(_, c)| *c == Some(0)));
             }
         }
-        // The section encodes against the same deal and play
-        let lines = double_dummy_play_to_pbn(&dd, &board.deal, play).unwrap();
-        assert_eq!(lines.len(), 13);
+        // The section encodes against the same deal and play, in both
+        // styles, and the compact one reads back to the same analysis
+        let explicit = double_dummy_play_to_pbn_as(&dd, &board.deal, play, DdPlayStyle::Explicit);
+        assert_eq!(explicit.unwrap().len(), 13);
+        let compact = double_dummy_play_to_pbn(&dd, &board.deal, play).unwrap();
+        let tokens: Vec<String> = compact
+            .iter()
+            .flat_map(|l| l.split_whitespace().map(str::to_string))
+            .collect();
+        let back = double_dummy_play_from_pbn(play.opening_leader, &tokens, &board.deal, play);
+        assert_eq!(back.unwrap().tricks, dd.tricks);
     }
 
     /// The played card's cost from its alternatives must be the cost the
